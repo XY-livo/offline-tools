@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>字幕时间轴偏移 · 合并（SRT，离线不上传）</title>
+<style>
+  :root{--bg:#0b0d12;--card:#141821;--line:#242a36;--txt:#e6e8ee;--dim:#8b94a6;--hi:#4ea1ff;--ok:#3ddc84;--warn:#ffb020}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  textarea{width:100%;height:300px;background:#0f1319;color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;font:13px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
+  label{font-size:13px;color:var(--dim);display:block;margin:14px 0 6px}
+  input[type=number],input[type=text],select{background:#0f1319;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 10px;font-size:14px;width:120px}
+  .row{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+  .btn{background:var(--hi);color:#04101f;border:0;border-radius:9px;padding:10px 18px;font-weight:700;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line);font-weight:600}
+  .stat{color:var(--dim);font-size:13px;margin:12px 0}
+  .stat b{color:var(--ok)}
+  .warn{color:var(--warn)}
+  .foot{margin-top:30px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>字幕时间轴偏移 / 合并</h1>
+  <div class="sub">整轨快进慢退、多个 SRT 合并成一条、按秒校准。<b>不上传、不联网。</b></div>
+
+  <div class="row">
+    <div><label>整体偏移（秒，可负）</label><input type="number" id="shift" value="0" step="0.1"></div>
+    <div><label>再乘倍率（1=不变）</label><input type="number" id="scale" value="1" step="0.001"></div>
+    <div><label>合并时前一条顺延（秒，留空=不合并）</label><input type="number" id="gap" step="0.1" placeholder="0"></div>
+    <button class="btn" id="run">转换</button>
+    <button class="btn ghost" id="dl">下载 .srt</button>
+    <label style="margin:0"><input type="file" id="file" accept=".srt,.vtt,.txt" hidden><button class="btn ghost" id="pick">打开文件</button></label>
+  </div>
+
+  <div class="stat" id="stat">把 SRT 贴到左边，点「转换」。</div>
+
+  <div class="grid">
+    <div><label>原文（SRT / VTT 都行）</label><textarea id="in" placeholder="1&#10;00:00:01,000 --> 00:00:03,500&#10;你好，这是第一句&#10;&#10;2&#10;00:00:04,000 --> 00:00:06,000&#10;第二句"></textarea></div>
+    <div><label>结果</label><textarea id="out" readonly></textarea></div>
+  </div>
+
+  <div class="foot">
+    合并多个文件：一次选多个，或先贴第一份 → 转换 → 把结果另存 → 再贴下一份（前一条会按「顺延」自动接上）。<br>
+    常见用法：视频片头剪掉 3.2 秒 → 偏移填 -3.2；变速 1.05 倍 → 倍率填 1.05、偏移填 0。
+  </div>
+</div>
+
+<script>
+(function(){
+  const $=(s)=>document.querySelector(s);
+  const inp=$('#in'), out=$('#out'), stat=$('#stat');
+
+  function parseTime(t){
+    t=t.trim().replace(',', '.');
+    const m=t.match(/(\d+):(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?/);
+    if(!m) return null;
+    const ms=(m[4]||'0').padEnd(3,'0');
+    return ((+m[1])*3600+(+m[2])*60+(+m[3]))*1000 + (+ms);
+  }
+  function fmt(ms){
+    if(ms<0) ms=0;
+    const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000), s=Math.floor(ms%60000/1000), x=Math.round(ms%1000);
+    const p=(n,l=2)=>String(n).padStart(l,'0');
+    return `${p(h)}:${p(m)}:${p(s)},${p(x,3)}`;
+  }
+  function parseSrt(txt){
+    // 兼容 VTT：去掉 WEBVTT 头与 cue 设置
+    txt = txt.replace(/^\uFEFF/,'').replace(/^WEBVTT[^\n]*\n+/i,'');
+    const blocks = txt.replace(/\r/g,'').split(/\n{2,}/);
+    const cues=[];
+    for(const b of blocks){
+      const lines=b.split('\n').filter(l=>l.trim()!=='');
+      if(!lines.length) continue;
+      let i=0;
+      if(/^\d+$/.test(lines[0].trim())) i=1;
+      const tl=lines[i]||'';
+      const m=tl.match(/(\d+:\d{1,2}:\d{1,2}[.,]\d{1,3})\s*-->\s*(\d+:\d{1,2}:\d{1,2}[.,]\d{1,3})/);
+      if(!m) continue;
+      const a=parseTime(m[1]), z=parseTime(m[2]);
+      if(a==null||z==null) continue;
+      cues.push({a, z, text: lines.slice(i+1).join('\n')});
+    }
+    return cues;
+  }
+  function toSrt(cues){
+    return cues.map((c,i)=>`${i+1}\n${fmt(c.a)} --> ${fmt(c.z)}\n${c.text}`).join('\n\n')+'\n';
+  }
+
+  $('#run').addEventListener('click',()=>{
+    const cues=parseSrt(inp.value||'');
+    if(!cues.length){ stat.textContent='没解析到字幕条 —— 检查是不是 SRT/VTT 格式。'; return; }
+    const sh=Number($('#shift').value||0)*1000;
+    const sc=Number($('#scale').value||1)||1;
+    let list=cues.map(c=>({a:Math.round(c.a*sc+sh), z:Math.round(c.z*sc+sh), text:c.text}));
+    list.sort((x,y)=>x.a-y.a);
+    // 纠错：结束早于开始 → 至少 0.5 秒
+    let fixed=0;
+    for(const c of list){ if(c.z<=c.a){ c.z=c.a+500; fixed++ } }
+    out.value=toSrt(list);
+    stat.innerHTML=`解析 <b>${list.length}</b> 条；偏移 ${sh/1000}s、倍率 ${sc}`+(fixed?`；<span class="warn">纠正 ${fixed} 条结束早于开始</span>`:'');
+  });
+
+  $('#dl').addEventListener('click',()=>{
+    if(!out.value.trim()) return;
+    const blob=new Blob([out.value],{type:'text/plain;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='转换后.srt'; a.click();
+  });
+
+  $('#pick').addEventListener('click',()=>$('#file').click());
+  $('#file').addEventListener('change', async (e)=>{
+    const files=[...e.target.files]; if(!files.length) return;
+    let text=''; let merged=0; let acc=null;
+    for(const f of files){
+      const t=await f.text();
+      const cues=parseSrt(t);
+      if(!cues.length) continue;
+      const sh=Number($('#shift').value||0)*1000, sc=Number($('#scale').value||1)||1;
+      const gapRaw=$('#gap').value; const gap = gapRaw==='' ? null : Number(gapRaw)*1000;
+      let list=cues.map(c=>({a:Math.round(c.a*sc+sh), z:Math.round(c.z*sc+sh), text:c.text}));
+      if(acc && gap!==null){ const off=acc.length? acc[acc.length-1].z+gap : 0; list=list.map(c=>({a:c.a+off, z:c.z+off, text:c.text})) }
+      acc = acc ? acc.concat(list) : list;
+      merged++;
+    }
+    if(!acc){ stat.textContent='这些文件里没解析到字幕。'; return; }
+    inp.value = files.length===1 ? await files[0].text() : '(多文件合并模式)';
+    out.value = toSrt(acc);
+    stat.innerHTML=`读入 <b>${merged}</b> 个文件，合计 ${acc.length} 条`+(merged>1?`（已按顺延 ${$('#gap').value||0}s 合并）`:'');
+  });
+})();
+</script>
+<div style="max-width:960px;margin:0 auto;padding:0 18px 30px;color:#8b94a6;font-size:12px">缺功能 / 想定制 → <a href="支持.html" style="color:#4ea1ff">反馈与支持</a></div>
+</body>
+</html>

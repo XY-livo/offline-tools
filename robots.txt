@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://XY-livo.github.io/offline-tools/sitemap.xml

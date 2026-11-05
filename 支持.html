@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>反馈 · 支持 · 定制</title>
+<style>
+  :root{--bg:#0b0d12;--card:#141821;--line:#242a36;--txt:#e6e8ee;--dim:#8b94a6;--hi:#4ea1ff;--ok:#3ddc84}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.85 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:44px 20px 70px}
+  h1{font-size:24px;margin:0 0 6px}
+  .dim{color:var(--dim);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .card h2{font-size:17px;margin:0 0 10px}
+  .card p{margin:6px 0}
+  a{color:var(--hi)}
+  .fill{background:#2a2110;border:1px dashed #6b5620;border-radius:6px;padding:1px 6px;color:#ffcf6b;font-family:ui-monospace,Consolas,monospace}
+  .qr{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
+  .qr figure{margin:0;text-align:center}
+  .qr img,.qr .ph{width:150px;height:150px;border-radius:10px;border:1px solid var(--line);background:#0f1319;object-fit:contain}
+  .qr figcaption{font-size:12px;color:var(--dim);margin-top:6px}
+  .ph{display:flex;align-items:center;justify-content:center;color:#4a5264;font-size:12px}
+  .foot{margin-top:28px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>反馈 · 支持 · 定制</h1>
+  <div class="dim">这些工具都是免费的、不上传数据。用得着、或者缺什么，从下面任一条路告诉我。</div>
+
+  <div class="card">
+    <h2>① 想要的功能 / 用出问题了</h2>
+    <p>邮箱：<a href="mailto:lm_livo@163.com?subject=%E5%B7%A5%E5%85%B7%E5%8F%8D%E9%A6%88">lm_livo@163.com</a>　（点一下就能直接写信）</p>
+    <p>或者直接开一个 issue（有 GitHub 账号的话）：
+      <a href="https://github.com/XY-livo/offline-tools/issues/new" target="_blank" rel="noopener">点这里提 issue</a></p>
+    <p class="dim">顺手写清三件事最快：你在做什么、原来怎么做的、希望它变成什么样。</p>
+  </div>
+
+  <div class="card">
+    <h2>② 想让我帮你做（定制）</h2>
+    <p>比如：把这些工具改成你店里的流程、加个批量规则、做成 Excel 里一键跑的、或者做个只有你们内部用的版本。</p>
+    <p>直接写信：<a href="mailto:lm_livo@163.com?subject=%E5%B7%A5%E5%85%B7%E5%AE%9A%E5%88%B6">lm_livo@163.com</a>　（标题写「工具定制」，说清你要它干什么，我先回一版方案再谈价）</p>
+  </div>
+
+  <div class="card">
+    <h2>③ 打赏（完全自愿，不影响任何功能）</h2>
+    <div class="qr">
+      <figure>
+        <img src="wx.png" alt="微信收款码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="ph" style="display:none">wx.png</div>
+        <figcaption>微信</figcaption>
+      </figure>
+      <figure>
+        <img src="ali.png" alt="支付宝收款码" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="ph" style="display:none">ali.png</div>
+        <figcaption>支付宝</figcaption>
+      </figure>
+    </div>
+    <p class="dim" style="margin-top:12px">把收款码截图存成 <code>wx.png</code> / <code>ali.png</code> 放进仓库根目录，这里就会显示。</p>
+  </div>
+
+  <div class="foot">
+    <a href="./">← 回工具列表</a>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>表格合并 · 去重 · 转编码（CSV，离线不上传）</title>
+<style>
+  :root{--bg:#0b0d12;--card:#141821;--line:#242a36;--txt:#e6e8ee;--dim:#8b94a6;--hi:#4ea1ff;--ok:#3ddc84;--warn:#ffb020}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 18px 60px}
+  h1{font-size:22px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:30px;text-align:center;color:var(--dim);cursor:pointer}
+  .drop.on,.drop:hover{border-color:var(--hi);color:var(--txt)}
+  .row{display:flex;flex-wrap:wrap;gap:14px;align-items:end;margin:16px 0}
+  label{font-size:13px;color:var(--dim);display:block;margin-bottom:6px}
+  input[type=text],select,input[type=checkbox]{background:#0f1319;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 10px;font-size:14px}
+  select,input[type=text]{width:170px}
+  .btn{background:var(--hi);color:#04101f;border:0;border-radius:9px;padding:10px 18px;font-weight:700;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line);font-weight:600}
+  .stat{color:var(--dim);font-size:13px;margin:10px 0}
+  .stat b{color:var(--ok)}
+  .warn{color:var(--warn)}
+  .scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:12px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+  th{position:sticky;top:0;background:#10141b;color:var(--dim)}
+  .foot{margin-top:26px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>表格合并 · 去重 · 转编码</h1>
+  <div class="sub">多个 CSV 合成一张、按列去重、UTF-8/GBK 自动识别，导出 Excel 直接能开。<b>文件不上传。</b></div>
+
+  <div class="drop" id="drop">拖入 CSV（可多选），或点这里选<input type="file" id="file" accept=".csv,.txt" multiple hidden></div>
+
+  <div class="row">
+    <div><label>分隔符</label>
+      <select id="sep"><option value="auto">自动识别</option><option value=",">逗号 ,</option><option value=";">分号 ;</option><option value="\t">制表符 Tab</option><option value="|">竖线 |</option></select>
+    </div>
+    <div><label>去重依据</label>
+      <select id="dedup"><option value="all">整行完全相同</option><option value="none">不去重</option><option value="col">按第几列（填右边）</option></select>
+    </div>
+    <div><label>列号（从 1 开始）</label><input type="text" id="colno" value="1"></div>
+    <div><label><input type="checkbox" id="trim" checked> 去掉首尾空格</label></div>
+    <div><label><input type="checkbox" id="skipEmpty" checked> 跳过空行</label></div>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="run" disabled>合并</button>
+    <button class="btn ghost" id="dl" disabled>导出 CSV（Excel 可直接开）</button>
+    <button class="btn ghost" id="clear">清空</button>
+  </div>
+
+  <div class="stat" id="stat">还没选文件。</div>
+  <div class="scroll" id="scroll" hidden><table id="tbl"><thead></thead><tbody></tbody></table></div>
+
+  <div class="foot">
+    说明：导出的 CSV 带 BOM，Excel 双击打开中文不乱码。如果你的表是"每个门店一张、字段顺序一样"，直接全选拖进来合并；
+    字段顺序不一致时会按第一张表的表头对齐（缺的列留空）。
+  </div>
+</div>
+
+<script>
+(function(){
+  const $=(s)=>document.querySelector(s);
+  const drop=$('#drop'), fileInput=$('#file'), stat=$('#stat');
+  const tbl=$('#tbl'), thead=tbl.querySelector('thead'), tbody=tbl.querySelector('tbody'), scroll=$('#scroll');
+  let files=[];
+
+  function human(b){ return b<1024? b+' B' : b<1048576? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(2)+' MB' }
+
+  // 编码：先试 UTF-8，出现替换字符再按 GBK 解
+  async function readText(file){
+    const buf=await file.arrayBuffer();
+    let t=new TextDecoder('utf-8',{fatal:false}).decode(buf);
+    if(t.includes('\uFFFD')){
+      try{ t=new TextDecoder('gbk',{fatal:false}).decode(buf) }catch(e){}
+    }
+    return t.replace(/^\uFEFF/,'');
+  }
+
+  function detectSep(text){
+    const first=text.split(/\r?\n/).slice(0,5).join('\n');
+    const cands=[',',';','\t','|'];
+    let best=',',max=0;
+    for(const c of cands){ const n=first.split(c).length-1; if(n>max){max=n;best=c} }
+    return best;
+  }
+
+  function parseCsv(text,sep){
+    const rows=[]; let row=[],cur='',q=false;
+    for(let i=0;i<text.length;i++){
+      const ch=text[i];
+      if(q){
+        if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++} else q=false }
+        else cur+=ch;
+      }else{
+        if(ch==='"') q=true;
+        else if(ch===sep){ row.push(cur); cur='' }
+        else if(ch==='\n'){ row.push(cur); rows.push(row); row=[]; cur='' }
+        else if(ch==='\r'){ /* skip */ }
+        else cur+=ch;
+      }
+    }
+    if(cur!==''||row.length){ row.push(cur); rows.push(row) }
+    return rows;
+  }
+
+  function render(header, rows){
+    thead.innerHTML='<tr>'+header.map(h=>`<th>${h||'(空)'}</th>`).join('')+'</tr>';
+    tbody.innerHTML=rows.slice(0,500).map(r=>'<tr>'+header.map((_,i)=>`<td>${(r[i]??'')}</td>`).join('')+'</tr>').join('');
+    scroll.hidden=false;
+  }
+
+  drop.addEventListener('click',()=>fileInput.click());
+  ['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('on')}));
+  ['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('on')}));
+  fileInput.addEventListener('change',e=>{ files=[...e.target.files]; show() });
+  drop.addEventListener('drop',e=>{ if(e.dataTransfer.files.length){ files=[...e.dataTransfer.files]; show() } });
+
+  function show(){
+    const total=files.reduce((s,f)=>s+f.size,0);
+    stat.textContent = files.length? `已选 ${files.length} 个文件，合计 ${human(total)}` : '还没选文件。';
+    $('#run').disabled = files.length===0;
+  }
+
+  $('#run').addEventListener('click', async ()=>{
+    stat.textContent='处理中…';
+    const sepOpt=$('#sep').value;
+    let header=null, all=[], totalRows=0, dropped=0, filesRead=0, gbk=0;
+    for(const f of files){
+      const t=await readText(f); filesRead++;
+      if(t.includes('\uFFFD')) gbk++;
+      const sep = sepOpt==='auto' ? detectSep(t) : (sepOpt==='\\t'?'\t':sepOpt);
+      const rows=parseCsv(t,sep).filter(r=>r.some(c=>String(c).trim()!==''));
+      if(!rows.length) continue;
+      totalRows+=rows.length;
+      let head=rows[0], body=rows.slice(1);
+      // 判定第一行是不是表头：只要有一格是非数字文本且不是纯数字，就当表头
+      const looksHeader = head.some(c=>/[^\d.,%\-]/.test(c) && String(c).trim()!=='');
+      if(!looksHeader){ head=null; body=rows }
+      if(!header){
+        header = head || rows[0].map((_,i)=>'列'+(i+1));
+        all = body.map(r=>r.slice());
+      }else{
+        // 按第一张表的表头对齐
+        const map = {};
+        if(head) head.forEach((h,i)=>map[String(h).trim()]=i);
+        body.forEach(function(r){
+          all.push(header.map(function(h,i){
+            if(!head) return (r[i] ?? '');
+            var at = map[String(h).trim()];
+            return (at === undefined) ? '' : (r[at] ?? '');
+          }));
+        });
+      }
+    }
+    const trim=$('#trim').checked, skipEmpty=$('#skipEmpty').checked;
+    let rows=all.map(r=>r.map(c=>trim?String(c).trim():String(c)));
+    if(skipEmpty) rows=rows.filter(r=>r.some(c=>c!==''));
+    const mode=$('#dedup').value;
+    let before=rows.length;
+    if(mode==='all'){
+      const seen=new Set(); rows=rows.filter(r=>{const k=r.join('\u0001'); if(seen.has(k))return false; seen.add(k); return true});
+    }else if(mode==='col'){
+      const idx=Math.max(0,(Number($('#colno').value)||1)-1);
+      const seen=new Set(); rows=rows.filter(r=>{const k=r[idx]??''; if(seen.has(k))return false; seen.add(k); return true});
+    }
+    window.__rows={header, rows};
+    render(header, rows);
+    $('#dl').disabled=false;
+    stat.innerHTML=`读 ${filesRead} 个文件 / ${totalRows} 行 → 合并后 <b>${rows.length}</b> 行` +
+      (mode!=='none'? `，去重掉 ${before-rows.length} 行`:'') +
+      (gbk? `；<span class="warn">有 ${gbk} 个文件按 GBK 解码</span>`:'') +
+      (rows.length>500? '（下表只预览前 500 行）':'');
+  });
+
+  $('#dl').addEventListener('click',()=>{
+    const {header, rows}=window.__rows||{};
+    if(!header) return;
+    const esc=(v)=>{ const s=String(v??''); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s };
+    const csv=[header.map(esc).join(','), ...rows.map(r=>r.map(esc).join(','))].join('\r\n');
+    const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='合并结果.csv'; a.click();
+  });
+
+  $('#clear').addEventListener('click',()=>{ files=[]; window.__rows=null; tbody.innerHTML=''; thead.innerHTML=''; scroll.hidden=true; $('#dl').disabled=true; show() });
+})();
+</script>
+<div style="max-width:960px;margin:0 auto;padding:0 18px 30px;color:#8b94a6;font-size:12px">缺功能 / 想定制 → <a href="支持.html" style="color:#4ea1ff">反馈与支持</a></div>
+</body>
+</html>
